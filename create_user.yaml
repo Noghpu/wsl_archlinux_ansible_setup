@@ -1,0 +1,30 @@
+- name: Arch Linux fresh-install user setup
+  hosts: all
+  become: true
+  vars:
+    # Use the current user's home as srcdir for building AUR packages
+    username: noghpu 
+
+  - name: Ensure user exists
+      ansible.builtin.user:
+        name: "{{ username }}"
+        groups: wheel
+        append: true
+        create_home: yes
+        shell: /bin/bash
+
+    - name: Create sudoers file for {{ username }}
+      ansible.builtin.lineinfile:
+        path: "/etc/sudoers"
+        line: "{{ username }} ALL=(ALL) NOPASSWD: ALL\n"
+        create: true
+        mode: '0440'
+      become: true
+
+    - name: Set default user in wsl.conf
+      ansible.builtin.blockinfile:
+        path: /etc/wsl.conf
+        block: |
+          [user]
+          default={{ username }}
+
