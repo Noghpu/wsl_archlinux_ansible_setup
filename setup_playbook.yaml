@@ -1,0 +1,119 @@
+- name: Arch Linux fresh-install setup
+  hosts: all
+  vars:
+    # Use the current user's home as srcdir for building AUR packages
+    aur_build_dir: "{{ ansible_env.HOME }}/.src"
+    username: noghpu 
+
+  tasks:
+
+    - name: Ensure user exists
+      ansible.builtin.user:
+        name: "{{ username }}"
+        groups: wheel
+        append: true
+        create_home: yes
+        shell: /bin/bash
+
+    - name: Create sudoers file for {{ username }}
+      ansible.builtin.lineinfile:
+        path: "/etc/sudoers"
+        line: "{{ username }} ALL=(ALL) NOPASSWD: ALL\n"
+        create: true
+        mode: '0440'
+      become: true
+
+    - name: Set default user in wsl.conf
+      ansible.builtin.blockinfile:
+        path: /etc/wsl.conf
+        block: |
+          [user]
+          default={{ username }}
+
+    - name: Update pacman package database
+      community.general.pacman:
+        update_cache: true
+
+    - name: Install as user
+      become_user: "{{ username }}"
+      become: true
+      block:
+
+        - name: Install base development tools and Git
+          community.general.pacman:
+            name:
+              - base-devel   # tools for building packages (compiling/linking):contentReference[oaicite:6]{index=6}
+              - sudo
+              - git
+            state: present
+
+        - name: Create yay directory
+          ansible.builtin.file:
+            path: "/home/{{ username }}/yay"
+            state: directory
+            mode: '0755'
+
+        - name: Clone the yay AUR helper nsource
+          ansible.builtin.git:
+            repo: https://aur.archlinux.org/yay-bin.git
+            dest: "/home/{{ username }}/yay"
+            depth: 1
+            update: true
+          register: yay_git
+
+        - name: Check if yay is installed (for AUR packages)
+          ansible.builtin.command: 'command -v yay'
+          register: yay_exists
+          ignore_errors: yes
+
+        - name: Build and install yay from AUR
+          ansible.builtin.command: 
+            cmd: makepkg --noconfirm -sfi
+            chdir: "/home/{{ username }}/yay"
+            creates: /usr/sbin/yay
+          when: ( yay_git.changed or yay_git.after is defined ) and ( yay_exists.rc!=0 )
+
+        - name: Ensure Yay is installed (for AUR packages)
+          ansible.builtin.command: 'command -v yay'
+          register: yay_exists
+          ignore_errors: yes
+
+        - name: Install CLI utilities from pacman repo
+          community.general.pacman:
+            name:
+              - fish                 # Alternative shell
+              - nushell              # NuShell (install latest stable from repo)
+              - btop                 # modern system monitor (bpytop successor)
+              - zoxide               # smarter cd command
+              - fd                   # modern find alternative
+              - bat                  # cat clone with syntax highlighting
+              - ripgrep              # fast recursive search
+              - python-uv            # 'uv' Python package manager (Astral's tool) 
+              - starship             # Cross-shell prompt (Astronauts' prompt):contentReference[oaicite:7]{index=7}
+              - ttf-jetbrains-mono-nerd  # JetBrains Mono Nerd Font (official package)
+              - chezmoi              # dotfiles manager
+              - fzf                  # fuzzy finder
+              - lazygit              # Git TUI client
+              - rustup               # Rust toolchain installer
+              - nodejs               # for Neovim LSP support and JS tooling
+              - podman               # Docker-compatible container engine
+              - git-delta            # delta diff viewer (syntax-highlighted pager):contentReference[oaicite:8]{index=8}
+              - 7zip                 # high-compression archiver (p7zip replacement)
+              - openssh              # SSH implementation
+            state: present
+
+        - name: Install Neovim nightly (AUR) and other AUR-only packages
+          community.general.pacman:
+            name:
+              - neovim-nightly-bin  # Nightly Neovim builds (bleeding-edge):contentReference[oaicite:9]{index=9}
+            state: present
+            executable: yay
+            extra_args: --noconfirm
+          when: yay_exists.rc == 0
+
+    - name: Change default shell and generate SSH key
+      ansible.builtin.user:
+        name: "{{ username }}"
+        generate_ssh_key: true
+        shell: /usr/bin/fish
+
